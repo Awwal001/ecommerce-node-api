@@ -5,7 +5,7 @@ import {token ,auth, authAdmin} from "../middleware/auth.js";
 
 const router = express.Router();
 
-router.post('/',  auth, createCart);
+router.post('/',  Token, createCart);
 router.put('/:id',  auth, updateCart);
 router.delete('/:id',  deleteCart);
 router.get('/search/:userId',  auth, getUserCart);
