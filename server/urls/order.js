@@ -1,15 +1,22 @@
 import express from "express";
-import { createOrder, updateOrder, deleteOrder, getOrders, getUserOrders, getOrdersStats } from '../views/order.js';
+import { 
+    createOrder, 
+    updateOrderAdmin, 
+    deleteOrder, 
+    getOrdersAdmin, 
+    getUserOrders, 
+    getOrdersStats 
+} from '../views/order.js';
 
-import {token ,auth, authAdmin} from "../middleware/auth.js";
+import { auth, authAdmin} from "../middleware/auth.js";
 
 const router = express.Router();
 
-router.post('/', Token, createOrder);
-router.put('/:id', authAdmin, updateOrder);
+router.post('/', auth, createOrder);
+router.put('/:id', authAdmin, updateOrderAdmin);
 router.delete('/:id', authAdmin, deleteOrder);
-router.get('/', authAdmin, getOrders);
-router.get('/search/:userId', auth, getUserOrders);
+router.get('/', authAdmin, getOrdersAdmin);
+router.get('/orders/me', auth, getUserOrders);
 router.get('/stats', authAdmin, getOrdersStats);
 
 export default router;
