@@ -1,32 +1,68 @@
 import express from "express";
 import OrderModel from "../models/order.js";
-import mongoose from "mongoose";
+import ProductModel from "../models/product.js";
 
 const router = express.Router();
 
 export const createOrder = async (req, res) => {
-    const newOrder = new OrderModel(req.body);
+    const {
+      shippingInfo,
+      orderItems,
+      paymentInfo,
+      itemsPrice,
+      taxPrice,
+      shippingPrice,
+      totalPrice,
+  } = req.body;
 
     try {
-        const savedOrder = await newOrder.save();
-    res.status(200).json(savedOrder);
+      const order = await OrderModel.create({
+        shippingInfo,
+        orderItems,
+        paymentInfo,
+        itemsPrice,
+        taxPrice,
+        shippingPrice,
+        totalPrice,
+        paidAt:Date.now(),
+        user: req.user._id,
+    });
+    res.status(200).json(order);
     } catch (error) {
         res.status(409).json({ message: error.message });
     }
 }
 
 
-export const updateOrder = async (req, res) => {
+export const updateOrderAdmin = async (req, res) => {
+
+
+      const order = await OrderModel.findById(req.params.id);
+      
+      if(!order){
+        return res.status(404).json({ message: "Order is not found with this id" });
+      }
+
+      if (order.orderStatus === "Delivered") {
+        return res.status(400).json({ message: "You have already delivered this order" });
+      }
+
+      if (req.body.status === "Shipped") {
+        order.orderItems.forEach(async (o) => {
+          await updateStock(o.product, o.quantity);
+        });
+      }
+      order.orderStatus = req.body.status;
+
+      if (req.body.status === "Delivered") {
+        order.deliveredAt = Date.now();
+      }
       
       try {
-        const updatedOrder = await OrderModel.findByIdAndUpdate(
-          req.params.id,
-          {
-            $set: req.body,
-          },
-          { new: true }
-        );
-        res.status(200).json(updatedOrder);
+        await order.save({ validateBeforeSave: false });
+        res.status(200).json({
+          success: true,
+        });
       } catch (err) {
         res.status(500).json(err);
       }
@@ -34,10 +70,27 @@ export const updateOrder = async (req, res) => {
 };
 
 
+async function updateStock(id, quantity) {
+      
+  const product = await ProductModel.findById(id);
+
+  product.Stock -= quantity;
+
+  await product.save({ validateBeforeSave: false });
+}
+
+
 
 export const deleteOrder = async (req, res) => {
+
+    const order = await OrderModel.findById(req.params.id);
+
+    if(!order){
+      return res.status(404).json({ message: "Order is not found with this id" });
+    }
+
     try {
-        await OrderModel.findByIdAndDelete(req.params.id);
+        await order.remove();
         res.status(200).json("Order has been deleted...");
       } catch (err) {
         res.status(500).json(err);
@@ -46,30 +99,32 @@ export const deleteOrder = async (req, res) => {
 
 export const getUserOrders = async (req, res) => {
     try {
-        const orders = await OrderModel.find({ userId: req.params.userId });
+        const orders = await OrderModel.find({user: req.user._id});
         res.status(200).json(orders);
       } catch (err) {
         res.status(500).json(err);
       }
 };
 
-export const getOrders = async (req, res) => {
+export const getOrdersAdmin = async (req, res) => {
     try {
         const orders = await OrderModel.find();
-        res.status(200).json(orders);
+
+        let totalAmount = 0;
+
+        orders.forEach((order) =>{
+            totalAmount += order.totalPrice;
+        });
+
+        res.status(200).json({
+          success: true,
+          totalAmount,
+          orders
+      });
       } catch (err) {
         res.status(500).json(err);
       }
 };
-
-// export const getOrder = async (req, res) => {
-//     try {
-//         const order = await OrderModel.findOne({ userId: req.params.userId });
-//         res.status(200).json(order);
-//       } catch (err) {
-//         res.status(500).json(err);
-//       }
-// };
 
 
 export const getOrdersStats = async (req, res) => {
@@ -98,7 +153,5 @@ export const getOrdersStats = async (req, res) => {
         res.status(500).json(err);
     }
 };
-
-
 
 export default router;
