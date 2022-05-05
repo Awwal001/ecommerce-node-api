@@ -1,7 +1,13 @@
 import express from "express";
-import { updateUser, deleteUser, getUser, getAllUsers, getUsersStats } from '../views/user.js';
+import { 
+    updateUser, 
+    deleteUser, 
+    getUser, 
+    getAllUsers, 
+    getUsersStats 
+} from '../views/user.js';
 
-import {token ,auth, authAdmin} from "../middleware/auth.js";
+import { auth, authAdmin} from "../middleware/auth.js";
 
 const router = express.Router();
 
