@@ -9,7 +9,6 @@ const orderSchema = new mongoose.Schema(
             },
             city: {
               type: String,
-              // required: true,
             },
             state: {
               type: String,
@@ -91,6 +90,7 @@ const orderSchema = new mongoose.Schema(
           },
           deliveredAt: Date,
     },
+    {timestamps: true}
 );
 
 export default mongoose.model("order", orderSchema);
