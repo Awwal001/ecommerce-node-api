@@ -1,18 +1,39 @@
 import express from "express";
 import ProductModel from "../models/Product.js";
-import mongoose from "mongoose";
+import Features from "../utils/Features";
+import cloudinary from "cloudinary";
+
 
 const router = express.Router();
 
 export const createProduct = async (req, res) => {
-    const Product = req.body;
+    let images = [];
 
-    const newProduct = new ProductModel({ ...Product, creator: req.userId })
+    if (typeof req.body.images === "string") {
+      images.push(req.body.images);
+    } else {
+      images = req.body.images;
+    }
 
+    const imagesLinks = [];
+
+    for (let i = 0; i < images.length; i++) {
+      const result = await cloudinary.v2.uploader.upload(images[i], {
+        folder: "products",
+      });
+
+      imagesLinks.push({
+        public_id: result.public_id,
+        url: result.secure_url,
+      });
+    }
+
+    req.body.images = imagesLinks;
+    req.body.user = req.user.id;
     try {
-        const savedProduct = await newProduct.save();
+        const product = await ProductModel.create(req.body);
 
-        res.status(201).json(savedProduct);
+        res.status(201).json(product);
     } catch (error) {
         res.status(409).json({ message: error.message });
     }
@@ -20,16 +41,47 @@ export const createProduct = async (req, res) => {
 
 
 export const updateProduct = async (req, res) => {
-      
+      let product = await ProductModel.findById(req.params.id);
+      if(!product){
+        return res.status(404).json({ message: "product doesn't exist" });
+      }
+
+      let images = [];
+
+      if (typeof req.body.images === "string") {
+        images.push(req.body.images);
+      } else {
+        images = req.body.images;
+      }
+    
+      if(images !== undefined){
+        
+        // Delete image from cloudinary
+        for (let i = 0; i < product.images.length; i++) {
+          await cloudinary.v2.uploader.destroy(product.images[i].public_id);
+        }
+          
+        const imagesLinks = [];
+
+        for (let i = 0; i < images.length; i++) {
+          const result = await cloudinary.v2.uploader.upload(images[i],{
+            folder:"products",
+          });
+        imagesLinks.push({
+          public_id: result.public_id,
+          url: result.secure_url,
+        })
+      }
+      req.body.images = imagesLinks;
+    }
+
       try {
-        const updatedProduct = await ProductModel.findByIdAndUpdate(
-          req.params.id,
-          {
-            $set: req.body,
-          },
-          { new: true }
-        );
-        res.status(200).json(updatedProduct);
+        product = await ProductModel.findByIdAndUpdate(req.params.id,req.body,{
+          new: true,
+          runValidators: true,
+          useUnified: false
+        });
+        res.status(200).json(product);
       } catch (err) {
         res.status(500).json(err);
       }
@@ -40,8 +92,20 @@ export const updateProduct = async (req, res) => {
 
 export const deleteProduct = async (req, res) => {
     try {
-        await ProductModel.findByIdAndDelete(req.params.id);
-        res.status(200).json("Product has been deleted...");
+      const product =  await ProductModel.findById(req.params.id);
+
+      if(!product){
+        return res.status(404).json({ message: "product doesn't exist" });
+      }
+      
+       // Deleting images from cloudinary
+      for (let i = 0; 1 < product.images.length; i++) {
+          await cloudinary.v2.uploader.destroy(
+          product.images[i].public_id
+        );
+      }
+    
+      await product.remove();
       } catch (err) {
         res.status(500).json(err);
       }
@@ -49,9 +113,12 @@ export const deleteProduct = async (req, res) => {
 
 export const getProduct = async (req, res) => {
     try {
-        const Product = await ProductModel.findById(req.params.id);
+        const product = await ProductModel.findById(req.params.id);
+        if(!product){
+          return res.status(404).json({ message: "product doesn't exist" });
+        }
         
-        res.status(200).json(Product);
+        res.status(200).json(product);
       } catch (err) {
         res.status(500).json(err);
       }
@@ -60,8 +127,11 @@ export const getProduct = async (req, res) => {
 export const getAllProducts = async (req, res) => {
     const qNew = req.query.new;
     const qCategory = req.query.category;
+    
     try {
         let products;
+        const productsCount = await ProductModel.countDocuments();
+        const resultPerPage = 8;
 
         if (qNew) {
         products = await ProductModel.find().sort({ createdAt: -1 }).limit(1);
@@ -72,10 +142,22 @@ export const getAllProducts = async (req, res) => {
             },
         });
         } else {
-        products = await ProductModel.find();
+
+          
+        const feature = new Features(ProductModel.find(), req.query)
+        .search()
+        .filter()
+        .pagination(resultPerPage)
+        ;
+        products = await feature.query; 
         }
 
-        res.status(200).json(products);
+        res.status(200).json({
+          success: true,
+          products,
+          productsCount,
+          resultPerPage
+        })
     } catch (err) {
         res.status(500).json(err);
     }
@@ -108,121 +190,111 @@ export const getProductsStats = async (req, res) => {
 
 
 
+// Create New Review or Update the review  
+export const createProductReview = async (req, res) => {
+  const { rating, comment, productId } = req.body;
+
+  const review = {
+    user: req.user._id,
+    name: req.user.name,
+    rating: Number(rating),
+    comment,
+  };
+
+  const product = await ProductModel.findById(productId);
+
+  const isReviewed = product.reviews.find(
+    (rev) => rev.user.toString() === req.user._id.toString()
+  );
+
+  if (isReviewed) {
+    product.reviews.forEach((rev) => {
+      if (rev.user.toString() === req.user._id.toString()){
+        rev.rating = rating
+        rev.comment = comment
+      }
+    });
+  } else {
+    product.reviews.push(review);
+    product.numOfReviews = product.reviews.length;
+  }
+
+  let avg = 0;
+
+  product.reviews.forEach((rev) => {
+    avg += rev.rating; 
+
+  });
+
+  product.ratings = avg / product.reviews.length;
+
+  await product.save({ validateBeforeSave: false });
+
+  res.status(200).json({
+    success: true,
+  });
+};
+
+// Get All reviews of a single product
+export const getSingleProductReviews  = async (req, res) => {
+  const product = await ProductModel.findById(req.query.id);
+
+  if(!product){
+    return res.status(404).json({ message: "product doesn't exist" });
+  }
+  
+  res.status(200).json({
+    success: true,
+    reviews: product.reviews
+  });
+};
+
+// Delete Review --Admin
+export const deleteReview  = async (req, res) => {
+
+  const product = await ProductModel.findById(req.query.productId);
+
+  if(!product){
+    return res.status(404).json({ message: "product doesn't exist" });
+  }
+
+  const reviews = product.reviews.filter(
+    (rev) => rev._id.toString() !== req.query.id.toString()
+  );
+
+  let avg = 0;
+
+  reviews.forEach((rev) => {
+    avg += rev.rating;
+  });
+
+  let ratings = 0;
+
+  if (reviews.length === 0) {
+    ratings = 0;
+  } else {
+    ratings = avg / reviews.length;
+  }
+
+  const numOfReviews = reviews.length;
+
+  await ProductModel.findByIdAndUpdate(
+    req.query.productId,
+    {
+      reviews,
+      ratings,
+      numOfReviews,
+    },
+    {
+      new: true,
+      runValidators: true,
+      useFindAndModify: false,
+    }
+  );
+
+  res.status(200).json({
+    success: true,
+  });
+};
+
 export default router;
-
-
-// export const getProduct = async (req, res) => {
-//     const { page } = req.query;
-    
-//     try {
-//         const LIMIT = 8;
-//         const startIndex = (Number(page) - 1) * LIMIT; // get the starting index of every page
-    
-//         const total = await PostMessage.countDocuments({});
-//         const Product = await PostMessage.find().sort({ _id: -1 }).limit(LIMIT).skip(startIndex);
-
-//         res.json({ data: Product, currentPage: Number(page), numberOfPages: Math.ceil(total / LIMIT)});
-//     } catch (error) {    
-//         res.status(404).json({ message: error.message });
-//     }
-// }
-
-// export const getProductBySearch = async (req, res) => {
-//     const { searchQuery, tags } = req.query;
-
-//     try {
-//         const title = new RegExp(searchQuery, "i");
-
-//         const Product = await PostMessage.find({ $or: [ { title }, { tags: { $in: tags.split(',') } } ]});
-
-//         res.json({ data: Product });
-//     } catch (error) {    
-//         res.status(404).json({ message: error.message });
-//     }
-// }
-
-// export const getProductByCreator = async (req, res) => {
-//     const { name } = req.query;
-
-//     try {
-//         const Product = await PostMessage.find({ name });
-
-//         res.json({ data: Product });
-//     } catch (error) {    
-//         res.status(404).json({ message: error.message });
-//     }
-// }
-
-// export const getProduct = async (req, res) => { 
-//     const { id } = req.params;
-
-//     try {
-//         const Product = await ProductMessage.findById(id);
-        
-//         res.status(200).json(Product);
-//     } catch (error) {
-//         res.status(404).json({ message: error.message });
-//     }
-// }
-
-
-
-// export const updateProduct = async (req, res) => {
-//     const { id } = req.params;
-//     const { title, message, creator, selectedFile, tags } = req.body;
-    
-//     if (!mongoose.Types.ObjectId.isValid(id)) return res.status(404).send(`No Product with id: ${id}`);
-
-//     const updatedProduct = { creator, title, message, tags, selectedFile, _id: id };
-
-//     await ProductMessage.findByIdAndUpdate(id, updatedProduct, { new: true });
-
-//     res.json(updatedProduct);
-// }
-
-// export const deleteProduct = async (req, res) => {
-//     const { id } = req.params;
-
-//     if (!mongoose.Types.ObjectId.isValid(id)) return res.status(404).send(`No Product with id: ${id}`);
-
-//     await ProductMessage.findByIdAndRemove(id);
-
-//     res.json({ message: "Product deleted successfully." });
-// }
-
-// export const likeProduct = async (req, res) => {
-//     const { id } = req.params;
-
-//     if (!req.userId) {
-//         return res.json({ message: "Unauthenticated" });
-//       }
-
-//     if (!mongoose.Types.ObjectId.isValid(id)) return res.status(404).send(`No Product with id: ${id}`);
-    
-//     const Product = await ProductMessage.findById(id);
-
-//     const index = Product.likes.findIndex((id) => id ===String(req.userId));
-
-//     if (index === -1) {
-//       Product.likes.push(req.userId);
-//     } else {
-//       Product.likes = Product.likes.filter((id) => id !== String(req.userId));
-//     }
-
-//     const updatedProduct = await ProductMessage.findByIdAndUpdate(id, Product, { new: true });
-
-//     res.status(200).json(updatedProduct);
-// }
-
-// export const commentProduct = async (req, res) => {
-//     const { id } = req.params;
-//     const { value } = req.body;
-
-//     const Product = await ProductMessage.findById(id);
-
-//     Product.comments.push(value);
-
-//     const updatedProduct = await ProductMessage.findByIdAndUpdate(id, Product, { new: true });
-
-//     res.json(updatedProduct);
-// };
