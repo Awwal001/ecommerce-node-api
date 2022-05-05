@@ -1,25 +1,42 @@
 import express from "express";
-import bcrypt from "bcryptjs";
+import cloudinary from "cloudinary"; 
 import UserModel from "../models/user.js";
-import mongoose from "mongoose";
+
 
 const router = express.Router();
 
 export const updateUser = async (req, res) => {
       
-    if (req.body.password) {
-        req.body.password = await bcrypt.hash(password, 12)
+      const newUserData = {
+            name: req.body.name,
+            email: req.body.email,
+        };
+
+      if (req.body.avatar !== "") {
+        const user = await UserModel.findById(req.user.id);
+
+        const imageId = user.avatar.public_id;
+
+        await cloudinary.v2.uploader.destroy(imageId);
+
+        const myCloud = await cloudinary.v2.uploader.upload(req.body.avatar, {
+          folder: "avatars",
+          width: 150,
+          crop: "scale",
+        });
+        newUserData.avatar = {
+          public_id: myCloud.public_id,
+          url: myCloud.secure_url,
+        };
       }
-    
+
       try {
-        const updatedUser = await UserModel.findByIdAndUpdate(
-          req.params.id,
-          {
-            $set: req.body,
-          },
-          { new: true }
-        );
-        res.status(200).json(updatedUser);
+        const user = await UserModel.findByIdAndUpdate(req.user.id, newUserData, {
+          new: true,
+          runValidator: true,
+          useFindAndModify: false,
+        });
+        res.status(200).json(user);
       } catch (err) {
         res.status(500).json(err);
       }
@@ -27,26 +44,21 @@ export const updateUser = async (req, res) => {
 };
 
 
-// export const updateUser = async (req, res) => {
-//     const { id } = req.params;
-//     const { email, password, firstname, lastname } = req.body;
-    
-//     if (!mongoose.Types.ObjectId.isValid(id)) return res.status(404).send(`No user with id: ${id}`);
-
-//     if (req.body.password) {
-//         req.body.password = await bcrypt.hash(password, 12)
-//       }
-
-//     const updatedUser = { email, password, firstname, lastname,  _id: id };
-
-//     await UserModel.findByIdAndUpdate(id, updatedUser, { new: true });
-
-//     res.json(updatedUser);
-// }
-
 export const deleteUser = async (req, res) => {
+
+    const user = await UserModel.findById(req.params.id);
+
+    const imageId = user.avatar.public_id;
+
+    await cloudinary.v2.uploader.destroy(imageId);
+
+    if(!user){
+        return res.status(400).json({ message: "User is not found with this id" });
+    }
+
+
     try {
-        await UserModel.findByIdAndDelete(req.params.id);
+        await user.remove();
         res.status(200).json("User has been deleted...");
       } catch (err) {
         res.status(500).json(err);
